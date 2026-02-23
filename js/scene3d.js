@@ -112,9 +112,9 @@ function buildScene(canvas) {
   key.shadow.mapSize.set(2048, 2048);
   scene.add(key);
 
-  scene.add(Object.assign(new THREE.DirectionalLight(0xb3d9ff, 0.3), {
-    position: new THREE.Vector3(-6, 8, -4),
-  }));
+  const fill = new THREE.DirectionalLight(0xb3d9ff, 0.3);
+  fill.position.set(-6, 8, -4);
+  scene.add(fill);
 
   // --- Shared materials ---
   const glassMat = new THREE.MeshPhysicalMaterial({
