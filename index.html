@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Enhanced 3D Chemistry Lab – Acid-Base Titration</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+  <canvas id="scene" aria-label="3D chemistry lab titration simulation" role="img"></canvas>
+
+  <!-- Controls Panel -->
+  <div id="controls" class="hud panel" aria-live="polite">
+    <h1>Acid–Base Titration Lab</h1>
+
+    <div class="section-title">Titration Type</div>
+    <div class="row" style="grid-template-columns: 1fr;">
+      <select id="titrationType" aria-label="Select titration type">
+        <option value="strong_base_strong_acid">Strong Base + Strong Acid (e.g., NaOH + HCl)</option>
+        <option value="strong_acid_strong_base">Strong Acid + Strong Base (e.g., HCl + NaOH)</option>
+        <option value="strong_base_weak_acid">Strong Base + Weak Acid (e.g., NaOH + CH₃COOH)</option>
+        <option value="strong_acid_weak_base">Strong Acid + Weak Base (e.g., HCl + NH₃)</option>
+        <option value="weak_acid_weak_base">Weak Acid + Weak Base (e.g., CH₃COOH + NH₃)</option>
+        <option value="strong_base_diprotic_acid">Strong Base + Diprotic Acid (e.g., NaOH + H₂SO₄)</option>
+        <option value="strong_base_triprotic_acid">Strong Base + Triprotic Acid (e.g., NaOH + H₃PO₄)</option>
+      </select>
+    </div>
+
+    <div class="section-title">Setup Parameters</div>
+    <div class="row">
+      <label id="analyteLbl">Analyte conc. (M)</label>
+      <select id="analyteConcSel" aria-label="Select analyte concentration">
+        <option value="0.050">0.050</option>
+        <option value="0.100" selected>0.100</option>
+        <option value="0.200">0.200</option>
+        <option value="0.500">0.500</option>
+        <option value="1.000">1.000</option>
+      </select>
+    </div>
+    <div class="row">
+      <label id="titrantLbl">Titrant conc. (M)</label>
+      <select id="titrantConcSel" aria-label="Select titrant concentration">
+        <option value="0.050">0.050</option>
+        <option value="0.100" selected>0.100</option>
+        <option value="0.200">0.200</option>
+        <option value="0.500">0.500</option>
+        <option value="1.000">1.000</option>
+      </select>
+    </div>
+    <div class="row">
+      <label id="analyteVolLbl">Analyte volume (mL)</label>
+      <input id="analyteVol" type="number" step="0.01" min="0" value="25.00">
+    </div>
+    <div class="row" id="pKaRow">
+      <label id="pKaLbl">pKa (e.g., Acetic 4.74)</label>
+      <input id="pKaInput" type="number" step="0.01" min="0" value="4.74">
+    </div>
+    <div class="row" id="pKa2Row" style="display:none;">
+      <label id="pKa2Lbl">pKa2 (2nd ionization)</label>
+      <input id="pKa2Input" type="number" step="0.01" min="0" value="7.20">
+    </div>
+    <div class="row" id="pKa3Row" style="display:none;">
+      <label id="pKa3Lbl">pKa3 (3rd ionization)</label>
+      <input id="pKa3Input" type="number" step="0.01" min="0" value="12.35">
+    </div>
+    <div class="row" id="pKbRow" style="display:none;">
+      <label id="pKbLbl">pKb (e.g., Ammonia 4.74)</label>
+      <input id="pKbInput" type="number" step="0.01" min="0" value="4.74">
+    </div>
+
+    <div class="section-title">Titration Controls</div>
+    <div class="row">
+      <label>Drops / second</label>
+      <input id="dps" type="range" min="0" max="10" step="1" value="0">
+    </div>
+    <div class="row">
+      <button id="toggleDrip" class="btn-accent">Start drip</button>
+      <div style="display:flex; gap:6px; flex-wrap:wrap;">
+        <button id="oneDrop">+1 drop</button>
+        <button id="fiveDrops">+5</button>
+        <button id="tenDrops">+10</button>
+      </div>
+    </div>
+    <div class="row">
+      <button id="resetBtn">Reset</button>
+      <button id="halfEq">Go to half-eq</button>
+    </div>
+    <div class="row">
+      <button id="exportData">📊 Export Data (CSV)</button>
+      <button id="detectEqPoint">🎯 Find Eq. Point</button>
+    </div>
+    <div class="row" style="grid-template-columns:1fr;">
+      <div class="muted">Burette dispensed: <span id="vbOut">0.00</span> mL &nbsp;•&nbsp; Equivalence at ~ <span id="veqOut">25.00</span> mL</div>
+    </div>
+    <div class="row" style="grid-template-columns:1fr;">
+      <div class="muted" id="indicatorInfo">Indicator: Phenolphthalein (colorless → pink around pH 8.2–10)</div>
+    </div>
+    <div class="row" style="grid-template-columns:1fr;">
+      <select id="indicatorSelect" aria-label="Select pH indicator">
+        <option value="universal">Universal Indicator (pH 0–14, full range)</option>
+        <option value="methyl_violet">Methyl Violet (pH 0.0–1.6)</option>
+        <option value="thymol_blue">Thymol Blue (pH 1.2–2.8, 8.0–9.6)</option>
+        <option value="orange_iv">Orange IV (pH 1.4–2.8)</option>
+        <option value="methyl_orange">Methyl Orange (pH 3.1–4.4)</option>
+        <option value="bromocresol_green">Bromocresol Green (pH 3.8–5.4)</option>
+        <option value="methyl_red">Methyl Red (pH 4.4–6.2)</option>
+        <option value="chromophenol_red">Chromophenol Red (pH 5.2–6.8)</option>
+        <option value="bromothymol_blue" selected>Bromothymol Blue (pH 6.0–7.6)</option>
+        <option value="phenol_red">Phenol Red (pH 6.8–8.4)</option>
+        <option value="neutral_red">Neutral Red (pH 6.8–8.0)</option>
+        <option value="phenolphthalein">Phenolphthalein (pH 8.2–10.0)</option>
+        <option value="thymolphthalein">Thymolphthalein (pH 9.3–10.5)</option>
+        <option value="alizarin_yellow">Alizarin Yellow (pH 10.1–12.0)</option>
+        <option value="indigo_carmine">Indigo Carmine (pH 11.4–13.0)</option>
+      </select>
+    </div>
+    <div class="row" style="grid-template-columns:1fr;">
+      <div class="indicator-wrap">
+        <div class="meter-title">Indicator color vs pH</div>
+        <div class="indicator-bar" id="indicatorBar" aria-label="Indicator color gradient by pH">
+          <div id="indicatorMarker" title="Current color marker"></div>
+        </div>
+        <div class="mini"><span>0</span><span>7</span><span>14</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- pH Meter -->
+  <div id="phMeter" class="hud panel" aria-live="polite">
+    <div class="meter-title">pH meter (solution in Erlenmeyer)</div>
+    <div class="meter-face">
+      <div class="pH-digits" id="phDigits">7.00</div>
+      <div class="meter-bar"><div id="phBar"></div></div>
+      <div class="mini"><span>0</span><span>7</span><span>14</span></div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <span class="chip" title="Total solution volume in the flask">V<sub>total</sub>: <span id="vtOut">25.00</span> mL</span>
+        <span class="chip" title="Drop size approximation">Drop ≈ <span id="dropSize">0.050</span> mL</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chemistry Details Panel -->
+  <div id="chemDetails" class="hud panel" aria-live="polite">
+    <div class="meter-title">Chemistry Details</div>
+    <div class="chem-grid">
+      <span class="muted-label">pOH:</span>       <span id="pOHOut" class="bold-val">7.00</span>
+      <span class="muted-label">[H⁺]:</span>      <span id="hConcOut" class="bold-val">1.00×10⁻⁷ M</span>
+      <span class="muted-label">[OH⁻]:</span>     <span id="ohConcOut" class="bold-val">1.00×10⁻⁷ M</span>
+      <span class="muted-label" id="kaLabel">Ka:</span>         <span id="kaOut" class="bold-val">—</span>
+      <span class="muted-label" id="kbLabel">Kb:</span>         <span id="kbOut" class="bold-val">—</span>
+    </div>
+    <div class="chem-divider"></div>
+    <div class="chem-grid">
+      <span class="muted-label">% Neutralized:</span> <span id="percentNeut" class="bold-val accent-val">0.0%</span>
+      <span class="muted-label">Eq. Points:</span>    <span id="eqPointsOut" class="bold-val" style="font-size:11px;">25.00 mL</span>
+    </div>
+  </div>
+
+  <!-- Titration Curve Panel -->
+  <div id="curvePanel" class="hud panel" aria-live="polite">
+    <div class="meter-title">Titration Curve (pH vs mL titrant added)</div>
+    <canvas id="curveCanvas"></canvas>
+    <div class="mini"><span>x: mL added</span><span>y: pH (0–14)</span></div>
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:6px;">
+      <span class="chip">Selected: <span id="selInfo">None</span></span>
+      <button id="copyPoint">Copy</button>
+      <button id="clearSel">Clear</button>
+    </div>
+  </div>
+
+  <div id="credit">3D by Three.js • Enhanced Titration Simulator</div>
+</div>
+
+<script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+<script src="js/indicators.js"></script>
+<script src="js/chemistry.js"></script>
+<script src="js/scene3d.js"></script>
+<script src="js/curve.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
