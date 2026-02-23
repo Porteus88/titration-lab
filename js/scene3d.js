@@ -7,7 +7,7 @@
 'use strict';
 
 /* =========================================================
-   Orbit Controls (lightweight, no external import needed)
+   Orbit Controls
    ========================================================= */
 class SimpleOrbitControls {
   constructor(camera, domElement) {
@@ -30,7 +30,6 @@ class SimpleOrbitControls {
     this.isDragging = false;
     this.lastX = 0;
     this.lastY = 0;
-
     this._bind();
     this.update();
   }
@@ -62,8 +61,7 @@ class SimpleOrbitControls {
       e.preventDefault();
       this.radius = THREE.MathUtils.clamp(
         this.radius * Math.exp(e.deltaY * this.zoomSpeed),
-        this.minRadius,
-        this.maxRadius,
+        this.minRadius, this.maxRadius,
       );
       this.update();
     }, { passive: false });
@@ -82,10 +80,55 @@ class SimpleOrbitControls {
 }
 
 /* =========================================================
-   Scene builder – returns a frozen object of refs
+   Flask geometry — profile matched to surface disc table
+   ========================================================= */
+
+/**
+ * Erlenmeyer lathe profile.
+ * Points are [radius, y-height].
+ * Keep widest point ≤ 0.90 so liquid disc never exceeds glass wall.
+ */
+const FLASK_PROFILE = [
+  [0.10, 0.00],  // base centre
+  [0.72, 0.04],  // base edge
+  [0.82, 0.25],  // lower body
+  [0.88, 0.60],  // widest (shoulder start)
+  [0.88, 0.80],  // shoulder flat
+  [0.72, 1.15],  // shoulder taper
+  [0.38, 1.60],  // neck start
+  [0.26, 1.82],  // neck
+  [0.26, 2.02],  // top of neck
+  [0.30, 2.05],  // rim flare
+];
+
+function _erlenmeyerGeometry() {
+  return new THREE.LatheGeometry(
+    FLASK_PROFILE.map(([r, y]) => new THREE.Vector2(r, y)),
+    64,
+  );
+}
+
+/**
+ * Interpolate the inner radius of the flask at a given y height.
+ * Subtracts glass wall thickness (0.015) from profile radius.
+ */
+const GLASS_WALL = 0.015;
+function _flaskRadiusAt(y) {
+  for (let i = 0; i < FLASK_PROFILE.length - 1; i++) {
+    const [r0, y0] = FLASK_PROFILE[i];
+    const [r1, y1] = FLASK_PROFILE[i + 1];
+    if (y >= y0 && y <= y1) {
+      const t = (y - y0) / (y1 - y0);
+      return Math.max(0, r0 + t * (r1 - r0) - GLASS_WALL);
+    }
+  }
+  return FLASK_PROFILE[FLASK_PROFILE.length - 1][0] - GLASS_WALL;
+}
+
+/* =========================================================
+   Scene builder
    ========================================================= */
 function buildScene(canvas) {
-  // --- Renderer ---
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
@@ -93,7 +136,6 @@ function buildScene(canvas) {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.localClippingEnabled = true;
 
-  // --- Scene & camera ---
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0xf8fafc);
 
@@ -103,24 +145,30 @@ function buildScene(canvas) {
   const controls = new SimpleOrbitControls(camera, renderer.domElement);
 
   // --- Lighting ---
-  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  scene.add(new THREE.AmbientLight(0xffffff, 0.65));
 
-  const key = new THREE.DirectionalLight(0xffffff, 0.8);
+  const key = new THREE.DirectionalLight(0xffffff, 0.85);
   key.position.set(8, 12, 6);
   key.castShadow = true;
   Object.assign(key.shadow.camera, { left: -5, right: 5, top: 5, bottom: -5 });
   key.shadow.mapSize.set(2048, 2048);
   scene.add(key);
 
-  const fill = new THREE.DirectionalLight(0xb3d9ff, 0.3);
+  const fill = new THREE.DirectionalLight(0xb3d9ff, 0.35);
   fill.position.set(-6, 8, -4);
   scene.add(fill);
 
-  // --- Shared materials ---
+  // --- Glass material: visible but transparent ---
+  // opacity 0.45 gives clear glass appearance with visible rim/edges
   const glassMat = new THREE.MeshPhysicalMaterial({
-    color: 0xd5e8f0, metalness: 0, roughness: 0.05,
-    transmission: 0.95, transparent: true, opacity: 0.8,
-    thickness: 0.5, envMapIntensity: 1.5,
+    color:            0xc8dde8,   // slightly blue-tinted glass
+    metalness:        0,
+    roughness:        0.04,
+    transmission:     0.0,        // use opacity instead for r128 compat
+    transparent:      true,
+    opacity:          0.35,
+    side:             THREE.FrontSide,
+    depthWrite:       false,
   });
 
   // --- Lab bench ---
@@ -132,7 +180,6 @@ function buildScene(canvas) {
   bench.receiveShadow = true;
   scene.add(bench);
 
-  // --- Stand ---
   _addStand(scene);
 
   // --- Burette ---
@@ -151,8 +198,8 @@ function buildScene(canvas) {
   // Graduation marks
   for (let i = 0; i <= 10; i++) {
     const mark = new THREE.Mesh(
-      new THREE.CylinderGeometry(TUBE_OUTER + 0.001, TUBE_OUTER + 0.001, 0.01, 32),
-      new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3 }),
+      new THREE.CylinderGeometry(TUBE_OUTER + 0.001, TUBE_OUTER + 0.001, 0.008, 32),
+      new THREE.MeshBasicMaterial({ color: 0x1e293b, transparent: true, opacity: 0.5 }),
     );
     mark.position.set(
       buretteOuter.position.x,
@@ -188,10 +235,11 @@ function buildScene(canvas) {
   tip.castShadow = true;
   scene.add(tip);
 
-  // Burette liquid fill
+  // Burette liquid — bright, solid, visible through glass
   const buretteLiquidMat = new THREE.MeshStandardMaterial({
     color: 0x00bfff, metalness: 0.1, roughness: 0.3,
-    emissive: 0x0088cc, emissiveIntensity: 0.5,
+    emissive: 0x0088cc, emissiveIntensity: 0.4,
+    transparent: true, opacity: 0.85,
   });
 
   const buretteFill = new THREE.Mesh(
@@ -202,8 +250,8 @@ function buildScene(canvas) {
   scene.add(buretteFill);
 
   const meniscus = new THREE.Mesh(
-    new THREE.CylinderGeometry(TUBE_INNER * 0.97, TUBE_INNER * 0.97, 0.04, 32),
-    new THREE.MeshBasicMaterial({ color: 0x0066cc }),
+    new THREE.CylinderGeometry(TUBE_INNER * 0.97, TUBE_INNER * 0.97, 0.035, 32),
+    new THREE.MeshBasicMaterial({ color: 0x0055bb, transparent: true, opacity: 0.9 }),
   );
   meniscus.position.set(buretteOuter.position.x, buretteOuter.position.y + BURETTE_H / 2, 0);
   scene.add(meniscus);
@@ -215,26 +263,43 @@ function buildScene(canvas) {
   flaskGlass.receiveShadow = true;
   scene.add(flaskGlass);
 
+  // Clip plane cuts the liquid at its surface (normal points DOWN, constant = height above flask base)
   const liquidClipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0.7);
+
+  // Liquid fill — transparent, colour-changing
   const liqMat = new THREE.MeshStandardMaterial({
-    color: 0xffffff, metalness: 0.05, roughness: 0.4,
-    emissive: 0xffffff, emissiveIntensity: 0.4,
-    side: THREE.DoubleSide,
-    clippingPlanes: [liquidClipPlane],
+    color:           0xffffff,
+    metalness:       0.0,
+    roughness:       0.35,
+    transparent:     true,
+    opacity:         0.55,          // semi-transparent solution
+    emissive:        0x888888,
+    emissiveIntensity: 0.15,
+    side:            THREE.DoubleSide,
+    clippingPlanes:  [liquidClipPlane],
+    depthWrite:      false,
   });
 
   const flaskLiquid = new THREE.Mesh(_erlenmeyerGeometry(), liqMat);
-  flaskLiquid.scale.set(0.93, 1.0, 0.93);
+  flaskLiquid.scale.set(0.96, 1.0, 0.96);  // slightly inside glass wall
   flaskLiquid.position.copy(flaskGlass.position);
   scene.add(flaskLiquid);
 
+  // Liquid surface disc — solid circle at the top of the liquid
   const flaskSurfaceMat = new THREE.MeshStandardMaterial({
-    color: 0xffffff, metalness: 0.2, roughness: 0.3,
-    emissive: 0xffffff, emissiveIntensity: 0.3,
-    side: THREE.DoubleSide,
+    color:           0xffffff,
+    metalness:       0.15,
+    roughness:       0.25,
+    transparent:     true,
+    opacity:         0.70,
+    emissive:        0x666666,
+    emissiveIntensity: 0.15,
+    side:            THREE.DoubleSide,
+    depthWrite:      false,
   });
+
   const flaskSurface = new THREE.Mesh(
-    new THREE.RingGeometry(0.05, 0.80, 32),
+    new THREE.CircleGeometry(0.72, 48),   // initial radius, updated every frame
     flaskSurfaceMat,
   );
   flaskSurface.rotation.x = -Math.PI / 2;
@@ -271,38 +336,29 @@ function buildScene(canvas) {
    ========================================================= */
 const _stirAxis = new THREE.Vector3(0, 1, 0);
 
-/**
- * Update burette and flask 3D objects to reflect current titration state.
- */
 function updateScene3D(refs, state) {
   const {
     buretteOuter, buretteFill, meniscus, handle,
-    flaskGlass, flaskLiquid, flaskSurface, liqMat, liquidClipPlane,
+    flaskGlass, flaskLiquid, flaskSurface, liquidClipPlane,
     TUBE_INNER, BURETTE_H,
   } = refs;
 
   // ---- Flask liquid level ----
-  const volRatio    = (state.analyteVol + state.titrantVol) / state.analyteVol;
-  const liqHeight   = clamp(0.70 * Math.pow(volRatio, 0.65), 0.30, 1.80);
+  const volRatio  = (state.analyteVol + state.titrantVol) / state.analyteVol;
+  const liqHeight = _clamp(0.60 * Math.pow(volRatio, 0.60), 0.20, 1.75);
+
   liquidClipPlane.constant = liqHeight;
 
   const liqTopY = flaskGlass.position.y + liqHeight;
   flaskSurface.position.y = liqTopY;
 
-  // Adjust surface disc radius to match flask width at current height
-  let outerR = 0.75;
-  if      (liqHeight < 0.6)  outerR = 0.70 + liqHeight * 0.2;
-  else if (liqHeight < 1.2)  outerR = 0.88;
-  else if (liqHeight < 1.7)  outerR = 0.88 - (liqHeight - 1.2) * 1.2;
-  else                       outerR = 0.28;
-  outerR = clamp(outerR, 0.25, 0.90);
-
+  // Surface disc radius from actual interpolated flask profile (no overflow)
+  const innerR = _flaskRadiusAt(liqHeight) * 0.96;   // 0.96 keeps inside liquid mesh scale
   flaskSurface.geometry.dispose();
-  flaskSurface.geometry = new THREE.RingGeometry(0.05, outerR, 32);
+  flaskSurface.geometry = new THREE.CircleGeometry(Math.max(0.05, innerR), 48);
 
   // ---- Burette liquid level ----
-  // Liquid drips from the BOTTOM (stopcock), so the top surface descends as burette empties.
-  const remainFrac    = clamp((state.titrantMax - state.titrantVol) / state.titrantMax, 0.02, 1.0);
+  const remainFrac    = _clamp((state.titrantMax - state.titrantVol) / state.titrantMax, 0.02, 1.0);
   const fillHeight    = Math.max(0.1, BURETTE_H * remainFrac);
   const buretteBottomY = buretteOuter.position.y - BURETTE_H / 2;
   const liquidBottomY  = buretteBottomY + 0.05;
@@ -318,19 +374,14 @@ function updateScene3D(refs, state) {
     : 0;
 }
 
-/**
- * Apply indicator color to flask liquid materials.
- */
 function applyFlaskColor(refs, color) {
+  // Apply colour with a fixed transparency — don't let emissive dominate
   refs.flaskLiquid.material.color.copy(color);
-  refs.flaskLiquid.material.emissive.copy(color).multiplyScalar(0.5);
+  refs.flaskLiquid.material.emissive.copy(color).multiplyScalar(0.2);
   refs.flaskSurface.material.color.copy(color);
-  refs.flaskSurface.material.emissive.copy(color).multiplyScalar(0.4);
+  refs.flaskSurface.material.emissive.copy(color).multiplyScalar(0.2);
 }
 
-/**
- * Advance the gentle stirring animation.
- */
 function animateStir(refs, dt) {
   refs.flaskLiquid.rotateOnAxis(_stirAxis, 0.15 * dt);
 }
@@ -341,7 +392,8 @@ function animateStir(refs, dt) {
 const _dropGeom = new THREE.SphereGeometry(0.04, 16, 16);
 const _dropMat  = new THREE.MeshStandardMaterial({
   color: 0x00d9ff, metalness: 0.2, roughness: 0.3,
-  emissive: 0x00aaff, emissiveIntensity: 0.6,
+  transparent: true, opacity: 0.85,
+  emissive: 0x00aaff, emissiveIntensity: 0.5,
 });
 const _drops = [];
 
@@ -358,12 +410,10 @@ function spawnDrop(scene, tipPosition) {
 function updateDrops(scene, dt, flaskBaseY) {
   for (let i = _drops.length - 1; i >= 0; i--) {
     const d = _drops[i];
-    d.userData.life  -= dt;
-    d.position.y     += d.userData.vy * dt;
-    d.userData.vy    -= 3.0 * dt;
-
-    const dead = d.position.y < flaskBaseY + 0.3 || d.userData.life <= 0;
-    if (dead) {
+    d.userData.life -= dt;
+    d.position.y    += d.userData.vy * dt;
+    d.userData.vy   -= 3.0 * dt;
+    if (d.position.y < flaskBaseY + 0.3 || d.userData.life <= 0) {
       scene.remove(d);
       _drops.splice(i, 1);
     }
@@ -371,7 +421,7 @@ function updateDrops(scene, dt, flaskBaseY) {
 }
 
 /* =========================================================
-   Window resize handler
+   Window resize
    ========================================================= */
 function onWindowResize(refs) {
   refs.camera.aspect = window.innerWidth / window.innerHeight;
@@ -383,7 +433,7 @@ function onWindowResize(refs) {
 /* =========================================================
    Private helpers
    ========================================================= */
-function clamp(x, lo, hi) {
+function _clamp(x, lo, hi) {
   return Math.min(Math.max(x, lo), hi);
 }
 
@@ -408,19 +458,11 @@ function _addStand(scene) {
   arm.position.set(-0.6, 3.2, 0);
   scene.add(arm);
 
-  const clamp = new THREE.Mesh(
+  const clampMesh = new THREE.Mesh(
     new THREE.BoxGeometry(0.15, 0.4, 0.15),
     new THREE.MeshStandardMaterial({ color: 0x1f2937, metalness: 0.4, roughness: 0.5 }),
   );
-  clamp.position.set(-0.2, 3.2, 0);
-  clamp.castShadow = true;
-  scene.add(clamp);
-}
-
-function _erlenmeyerGeometry() {
-  const profile = [
-    [0.15, 0.00], [0.80, 0.05], [0.90, 0.30], [0.95, 0.70],
-    [0.75, 1.20], [0.40, 1.65], [0.28, 1.85], [0.28, 2.05], [0.32, 2.08],
-  ];
-  return new THREE.LatheGeometry(profile.map(([r, y]) => new THREE.Vector2(r, y)), 64);
+  clampMesh.position.set(-0.2, 3.2, 0);
+  clampMesh.castShadow = true;
+  scene.add(clampMesh);
 }
